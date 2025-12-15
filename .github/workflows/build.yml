@@ -1,0 +1,56 @@
+name: build
+
+on:
+  push:
+
+env:
+  ARTIFACTS_PATH: artifacts
+  PROJECT_NAME: genesis_lbaas
+  REPO_ENDPOINT_PUT: http://10.20.0.1:8082
+
+jobs:
+  Build:
+    runs-on: self-hosted
+    strategy:
+      fail-fast: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 30
+      - name: Build Genesis LBaaS
+        run: |
+          set -eux
+
+          mkdir -p ${ARTIFACTS_PATH}
+
+          # Install DevTools
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install genesis-devtools
+
+          VERSION="$(genesis get-version .)"
+
+          genesis build $(pwd)
+
+          # Upload the VM image
+          curl -X PUT --upload-file output/genesis-lbaas.raw.gz \
+            $REPO_ENDPOINT_PUT/${PROJECT_NAME}/${VERSION}/genesis-lbaas.raw.gz
+
+          # Temporary upload step is done in the build script
+          echo "${VERSION}" > "${ARTIFACTS_PATH}/version.txt"
+          mv output/*.raw.gz "${ARTIFACTS_PATH}/"
+      - name: Set current date as env variable
+        id: date
+        run: |
+          r=$(date -u +'%Y.%m.%d')
+          echo "DATE=$r" >> $GITHUB_OUTPUT
+      - name: Publish image (for tags only)
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ./artifacts/*.gz
+          tag: ${{ github.ref }}
+          release_name: ${{ steps.date.outputs.DATE }} (${{ github.ref_name }})
+          overwrite: true
+          file_glob: true
