@@ -20,7 +20,7 @@ set -eu
 set -x
 set -o pipefail
 
-SDK_MIN_VER=0.11.1
+SDK_MIN_VER=1.1.0
 
 
 # Install packages
@@ -63,8 +63,7 @@ EOF
 sudo sed -i '/caps_drivers/ s/$/,LBCapabilityDriver/' /etc/genesis_universal_agent/genesis_universal_agent.conf
 
 # Use fresh sdk
-source /opt/universal_agent/.venv/bin/activate
-pip install --upgrade gcl_sdk>=$SDK_MIN_VER
+/opt/universal_agent/.venv/bin/pip install --upgrade "gcl_sdk>=${SDK_MIN_VER}"
 
 cat >>/etc/systemd/system.conf <<EOF
 
