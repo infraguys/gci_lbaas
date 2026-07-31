@@ -36,19 +36,13 @@ sudo mkdir -p /etc/nginx/ssl
 sudo chown www-data:www-data /etc/nginx/ssl
 sudo mkdir -p /etc/nginx/exordos/
 
-# Cert to restrict default_server
-sudo openssl req -x509 -nodes -days 3650 -newkey rsa:2048 -subj "/C=PE/ST=Exordos/L=Exordos/O=Exordos core dummy cert. /OU=IT Department/CN=exordos.core" -keyout /etc/nginx/ssl/nginx.key -out /etc/nginx/ssl/nginx.crt
-
-# Block any connections not explicitly set
+# Block unmatched HTTP connections. HTTPS listeners are created only for
+# load-balancer virtual hosts that have certificates configured.
 cat <<EOF | sudo tee /etc/nginx/sites-enabled/default
 server {
     listen 80 default_server reuseport;
-    listen 443 ssl default_server reuseport;
     listen [::]:80 default_server;
-    listen [::]:443 ssl default_server;
     server_name _;
-    ssl_certificate /etc/nginx/ssl/nginx.crt;
-    ssl_certificate_key /etc/nginx/ssl/nginx.key;
 
     location / {
         return 444;
