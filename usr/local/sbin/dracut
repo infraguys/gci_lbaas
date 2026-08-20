@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+
+# Generate boot initramfs images off to the side, validate them, then replace
+# the published path atomically. A failed dracut run can therefore never
+# truncate the last known-good image in place.
+
+set -euo pipefail
+
+real_dracut=${EXORDOS_DRACUT_REAL:-/usr/bin/dracut}
+validator=${EXORDOS_INITRAMFS_VALIDATOR:-/usr/local/libexec/exordos-validate-initramfs}
+args=("$@")
+target_index=-1
+rebuild_source=
+rebuild_source_index=-1
+
+if [[ ! -x "$real_dracut" ]]; then
+    echo "dracut wrapper: ${real_dracut} is unavailable" >&2
+    exit 1
+fi
+
+for index in "${!args[@]}"; do
+    case "${args[$index]}" in
+        --rebuild)
+            next_index=$((index + 1))
+            if ((next_index >= ${#args[@]})) || [[ -n "$rebuild_source" ]]; then
+                exec "$real_dracut" "${args[@]}"
+            fi
+            rebuild_source=${args[$next_index]}
+            rebuild_source_index=$next_index
+            ;;
+        --rebuild=*)
+            if [[ -n "$rebuild_source" ]]; then
+                exec "$real_dracut" "${args[@]}"
+            fi
+            rebuild_source=${args[$index]#--rebuild=}
+            rebuild_source_index=$index
+            ;;
+    esac
+done
+
+for index in "${!args[@]}"; do
+    if ((index == rebuild_source_index)); then
+        continue
+    fi
+    case "${args[$index]}" in
+        initrd.img-* | */initrd.img-*)
+            if ((target_index >= 0)); then
+                echo "dracut wrapper: multiple initramfs output paths" >&2
+                exit 2
+            fi
+            target_index=$index
+            ;;
+    esac
+done
+
+if ((target_index < 0)); then
+    if [[ -z "$rebuild_source" ]]; then
+        exec "$real_dracut" "${args[@]}"
+    fi
+    target=$rebuild_source
+    rebuild_in_place=true
+else
+    target=${args[$target_index]}
+    rebuild_in_place=false
+    if [[ -n "$rebuild_source" && "$target" == "$rebuild_source" ]]; then
+        rebuild_in_place=true
+    fi
+fi
+
+# Match dracut's canonical output handling so publishing through an initramfs
+# symlink updates its versioned target without replacing the link itself.
+resolved_target=$(readlink -f -- "$target") && target=$resolved_target
+target_dir=$(dirname -- "$target")
+target_name=$(basename -- "$target")
+candidate=$(mktemp --tmpdir="$target_dir" ".${target_name}.exordos.XXXXXX")
+
+# When the target exists, keep the empty candidate created by mktemp. Dracut
+# then applies its own force-option parsing to that existing file: no force
+# means a native refusal, while every supported force spelling (including
+# clustered short options) overwrites only the candidate. For a new target,
+# remove the placeholder so the normal no-force create path still works.
+if [[ ! -f "$target" ]]; then
+    rm -f -- "$candidate"
+fi
+trap 'rm -f -- "$candidate"' EXIT
+if ((target_index < 0)); then
+    args+=("$candidate")
+else
+    args[target_index]=$candidate
+fi
+if [[ "$rebuild_in_place" == true ]]; then
+    # An implicit rebuild normally forces its input/output file in place. Once
+    # the source and candidate are separated, retain that native behaviour for
+    # the candidate without exposing the published source to writes.
+    args=(--force "${args[@]}")
+fi
+
+set +e
+"$real_dracut" "${args[@]}"
+status=$?
+set -e
+if ((status != 0)); then
+    exit "$status"
+fi
+
+"$validator" "$candidate"
+sync -f "$candidate"
+mv -f -- "$candidate" "$target"
+trap - EXIT

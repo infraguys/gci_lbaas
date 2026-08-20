@@ -1,0 +1,39 @@
+#!/bin/sh
+
+set -eu
+
+initramfs="${1:-}"
+skipcpio=${DRACUT_SKIPCPIO:-/usr/lib/dracut/skipcpio}
+
+if [ -z "$initramfs" ] || [ ! -s "$initramfs" ]; then
+    echo "initramfs validation failed: missing or empty ${initramfs:-path}" >&2
+    exit 1
+fi
+
+magic=$(dd if="$initramfs" bs=1 count=6 2>/dev/null | od -An -tx1 | tr -d ' \n')
+case "$magic" in
+    303730373031 | 303730373032)
+        if [ ! -x "$skipcpio" ]; then
+            echo "initramfs validation failed: ${skipcpio} is unavailable" >&2
+            exit 1
+        fi
+        compressed_payload() {
+            "$skipcpio" "$initramfs"
+        }
+        ;;
+    *)
+        compressed_payload() {
+            cat "$initramfs"
+        }
+        ;;
+esac
+
+if ! compressed_payload | zstd -t >/dev/null 2>&1; then
+    echo "initramfs validation failed: truncated zstd stream in ${initramfs}" >&2
+    exit 1
+fi
+
+if ! lsinitrd "$initramfs" >/dev/null 2>&1; then
+    echo "initramfs validation failed: unreadable archive in ${initramfs}" >&2
+    exit 1
+fi

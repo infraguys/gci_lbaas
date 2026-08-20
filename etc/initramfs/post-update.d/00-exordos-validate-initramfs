@@ -1,0 +1,16 @@
+#!/bin/sh
+
+# update-initramfs runs this path before later bootloader hooks.
+
+set -eu
+
+version="${1:-}"
+initramfs="${2:-}"
+validator=${EXORDOS_INITRAMFS_VALIDATOR:-/usr/local/libexec/exordos-validate-initramfs}
+
+[ -n "$version" ] || exit 0
+if [ -z "$initramfs" ]; then
+    initramfs="/boot/initrd.img-${version}"
+fi
+
+exec "$validator" "$initramfs"

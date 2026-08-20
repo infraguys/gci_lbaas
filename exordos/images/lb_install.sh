@@ -23,6 +23,32 @@ set -o pipefail
 SDK_MIN_VER=3.0.5
 
 
+# Kernel package hooks run while the full load-balancer stack is active after
+# deployment. Keep compression memory deterministic so a package upgrade cannot
+# leave a truncated initramfs that fails only on the next boot.
+sudo install -d -m 0755 \
+    /etc/dracut.conf.d \
+    /etc/initramfs/post-update.d \
+    /etc/kernel/postinst.d \
+    /usr/local/libexec \
+    /usr/local/sbin
+sudo install -m 0644 \
+    /opt/gci_lbaas/etc/dracut.conf.d/20-low-memory.conf \
+    /etc/dracut.conf.d/20-low-memory.conf
+sudo install -m 0755 \
+    /opt/gci_lbaas/usr/local/libexec/exordos-validate-initramfs \
+    /usr/local/libexec/exordos-validate-initramfs
+sudo install -m 0755 \
+    /opt/gci_lbaas/usr/local/sbin/dracut \
+    /usr/local/sbin/dracut
+sudo install -m 0755 \
+    /opt/gci_lbaas/etc/initramfs/post-update.d/00-exordos-validate-initramfs \
+    /etc/initramfs/post-update.d/00-exordos-validate-initramfs
+sudo install -m 0755 \
+    /opt/gci_lbaas/etc/kernel/postinst.d/zz-exordos-validate-initramfs \
+    /etc/kernel/postinst.d/zz-exordos-validate-initramfs
+
+
 # Install packages
 sudo apt update
 sudo apt dist-upgrade -y
@@ -76,3 +102,11 @@ DefaultTasksMax=65000
 EOF
 
 rsync -a /opt/gci_lbaas/etc/sysctl.d/* /etc/sysctl.d/
+
+# The build must never publish a kernel whose initramfs is already damaged.
+for initramfs in /boot/initrd.img-*; do
+    [ -e "$initramfs" ] || continue
+    version=${initramfs##*/initrd.img-}
+    /etc/kernel/postinst.d/zz-exordos-validate-initramfs \
+        "$version" "/boot/vmlinuz-${version}"
+done

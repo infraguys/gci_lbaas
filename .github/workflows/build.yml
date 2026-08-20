@@ -18,6 +18,24 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 30
+      - name: Test initramfs safeguards
+        run: |
+          set -euo pipefail
+          tests/test_initramfs_guard.sh
+          test_root=$(mktemp -d)
+          cleanup() {
+            find -P "$test_root" -xdev -depth -delete
+          }
+          trap cleanup EXIT
+          dracut_deb="$test_root/dracut.deb"
+          curl -fsSL \
+            https://archive.ubuntu.com/ubuntu/pool/main/d/dracut/dracut_110-11_all.deb \
+            -o "$dracut_deb"
+          echo 'd02d50827d6cb43c7c839e7f77c52ffc50c3fd685e2c4d41e8794edf1a20c85e  '"$dracut_deb" | \
+            sha256sum --check --status
+          dpkg-deb --extract "$dracut_deb" "$test_root/root"
+          UPDATE_INITRAMFS="$test_root/root/usr/sbin/update-initramfs" \
+            tests/test_update_initramfs_rollback.sh
       - name: Build Exordos LBaaS
         run: |
           set -eux
