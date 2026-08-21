@@ -1,0 +1,21 @@
+#!/bin/sh
+
+# Refuse to publish a GRUB entry for an initramfs that dracut did not finish.
+# This hook sorts before zz-update-grub in Debian's kernel postinst run-parts.
+
+set -eu
+
+version="${1:-}"
+kernel_image="${2:-}"
+
+[ -n "$version" ] || exit 0
+
+boot_dir=/boot
+if [ -n "$kernel_image" ]; then
+    boot_dir=$(dirname "$kernel_image")
+fi
+
+initramfs="${boot_dir}/initrd.img-${version}"
+validator=${EXORDOS_INITRAMFS_VALIDATOR:-/usr/local/libexec/exordos-validate-initramfs}
+
+exec "$validator" "$initramfs"
